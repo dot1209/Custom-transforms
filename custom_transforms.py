@@ -1,5 +1,8 @@
 from typing import List, Tuple, Dict, Optional
 
+import numpy as np
+import math
+from numpy.lib.function_base import delete
 import torch
 import torchvision
 from torch import nn, Tensor
@@ -16,6 +19,12 @@ def _flip_coco_person_keypoints(kps, width):
     flipped_data[inds] = 0
     return flipped_data
 
+def _rotate(x, y, degree):
+    degree = math.radians(degree)
+    x = math.cos(degree) * x - math.sin(degree) * y
+    y = math.sin(degree) * x + math.cos(degree) * y
+
+    return x, y
 
 class Compose:
     def __init__(self, transforms):
@@ -27,7 +36,9 @@ class Compose:
         return image, target
 
 class RandomRotation(T.RandomRotation):
-    def forward(self, img, bbox):
+    def forward(
+        self, img: Tensor, target: Optional[Dict[str, Tensor]]
+    ) -> Tuple[Tensor, Optional[Dict[str, Tensor]]]:
         fill = self.fill
         if isinstance(img, Tensor):
             if isinstance(fill, (int, float)):
@@ -37,8 +48,10 @@ class RandomRotation(T.RandomRotation):
         angle = self.get_params(self.degrees)
         
         img = F.rotate(img, angle, self.resample, self.expand, self.center, fill)
-        bbox = F.rotate(bbox, angle)
-        return img, bbox
+        target["boxes"][0][0], target["boxes"][0][1] = _rotate(target["boxes"][0][0], target["boxes"][0][1], degree=angle)
+        target["boxes"][0][2], target["boxes"][0][3] = _rotate(target["boxes"][0][2], target["boxes"][0][3], degree=angle)
+
+        return img, target
 
 class Normalize(T.Normalize):
     """
@@ -84,14 +97,12 @@ class ToTensor(nn.Module):
         image = F.convert_image_dtype(image)
         return image, target
 
-
 class PILToTensor(nn.Module):
     def forward(
         self, image: Tensor, target: Optional[Dict[str, Tensor]] = None
     ) -> Tuple[Tensor, Optional[Dict[str, Tensor]]]:
         image = F.pil_to_tensor(image)
         return image, target
-
 
 class ConvertImageDtype(nn.Module):
     def __init__(self, dtype: torch.dtype) -> None:
